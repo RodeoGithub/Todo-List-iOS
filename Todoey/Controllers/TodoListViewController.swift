@@ -13,12 +13,17 @@ class TodoListViewController: UITableViewController {
 
     var itemArray: [Item] = []
     
+    var selectedCategory: Category? {
+        didSet {
+            loadItems()
+        }
+    }
+    
     let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        loadData()
+        title = K.itemsViewTitle
     }
     
     //MARK: - TableView Data Source
@@ -28,7 +33,7 @@ class TodoListViewController: UITableViewController {
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "ToDoItemCell", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: K.itemCellId, for: indexPath)
         let item = itemArray[indexPath.row]
         
         cell.textLabel?.text = item.title
@@ -43,19 +48,19 @@ class TodoListViewController: UITableViewController {
         itemArray[indexPath.row].done = !itemArray[indexPath.row].done
         
         tableView.deselectRow(at: indexPath, animated: true)
-        saveData()
+        saveItems()
         tableView.reloadData()
     }
     
     override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { (deleteAction, view, success:(Bool)->Void) in
-            self.deleteData(at: indexPath)
-            self.saveData()
+            self.deleteItem(at: indexPath)
+            self.saveItems()
             self.tableView.reloadData()
             success(true)
         }
         
-        deleteAction.image = UIImage(systemName: "trash.fill")
+        deleteAction.image = UIImage(systemName: K.trashIcon)
         deleteAction.backgroundColor = .systemRed
         
         return UISwipeActionsConfiguration(actions: [deleteAction])
@@ -66,26 +71,27 @@ class TodoListViewController: UITableViewController {
     
     @IBAction func addButtonPressed(_ sender: UIBarButtonItem) {
         var textField = UITextField()
-        let alert = UIAlertController(title: "Add a new item", message: "", preferredStyle: .alert)
-        let action = UIAlertAction(title: "Add item", style: .default) { (action) in
+        let alert = UIAlertController(title: K.AddItem.alertTitle, message: "", preferredStyle: .alert)
+        let action = UIAlertAction(title: K.AddItem.addButtonTitle, style: .default) { (action) in
             
             let newItem = Item(context: self.context)
             
             if textField.text != nil && textField.text != "" {
-                newItem.title = textField.text
+                newItem.title = textField.text!
             }
             else {
-                newItem.title = "Empty item"
+                newItem.title = K.AddItem.emptyItem
             }
-            
+            newItem.normalizedTitle = newItem.title!.lowercased()
             newItem.done = false
+            newItem.parentCategory = self.selectedCategory
             self.itemArray.append(newItem)
-            self.saveData()
+            self.saveItems()
             self.tableView.reloadData()
         }
         
         alert.addTextField { (alertTextField) in
-            alertTextField.placeholder = "New item"
+            alertTextField.placeholder = K.AddItem.alertTextPlaceholder
             textField = alertTextField
         }
         
@@ -96,10 +102,18 @@ class TodoListViewController: UITableViewController {
     
     //MARK: - Database
     
-    func loadData(){
-        // Specify the type of the result.
-        let request: NSFetchRequest<Item> = Item.fetchRequest()
+    func loadItems(with request: NSFetchRequest<Item> = Item.fetchRequest(), _ predicate: NSPredicate? = nil){
         do {
+            let categoryPredicate = NSPredicate(format: "parentCategory.name MATCHES %@", selectedCategory!.name!)
+            if let additionalPredicate = predicate {
+                request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    categoryPredicate,
+                    additionalPredicate
+                ])
+            }
+            else {
+                request.predicate = categoryPredicate
+            }
             let result = try context.fetch(request)
             itemArray = result
         }
@@ -108,7 +122,7 @@ class TodoListViewController: UITableViewController {
         }
     }
     
-    func saveData(){
+    func saveItems(){
         do {
             try context.save()
         }
@@ -117,7 +131,7 @@ class TodoListViewController: UITableViewController {
         }
     }
     
-    func deleteData(at indexPath: IndexPath){
+    func deleteItem(at indexPath: IndexPath){
         context.delete(itemArray[indexPath.row])
         itemArray.remove(at: indexPath.row)
     }
@@ -128,22 +142,27 @@ class TodoListViewController: UITableViewController {
 extension TodoListViewController: UISearchBarDelegate {
     func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         if searchBar.text == nil || searchBar.text == "" {
-            loadData()
+            loadItems()
             tableView.reloadData()
         }
         else {
             let request: NSFetchRequest<Item> = Item.fetchRequest()
-            let predicate = NSPredicate(format: "title CONTAINS %@", searchBar.text!)
-            request.predicate = predicate
-            do {
-                let result = try context.fetch(request)
-                itemArray = result
-                tableView.reloadData()
-            }
-            catch {
-                print(error)
+            let normalizedSearch = searchBar.text!.lowercased()
+            let predicate = NSPredicate(format: "normalizedTitle CONTAINS[cd] %@", normalizedSearch)
+            
+            loadItems(with: request, predicate)
+            tableView.reloadData()
+        }
+    }
+    
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+        if searchBar.text?.count == 0 {
+            loadItems()
+            tableView.reloadData()
+            
+            DispatchQueue.main.async {
+                searchBar.resignFirstResponder()
             }
         }
-        searchBar.endEditing(true)
     }
 }
